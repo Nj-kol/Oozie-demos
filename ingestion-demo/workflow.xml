@@ -1,0 +1,116 @@
+<workflow-app name="${permTable}-ingest-wf" xmlns="uri:oozie:workflow:0.5">
+
+        <start to="import-action"/>
+
+        <action name="import-action">     
+          <sqoop xmlns="uri:oozie:sqoop-action:0.2">
+            <job-tracker>${jobTracker}</job-tracker>
+            <name-node>${nameNode}</name-node>
+            <arg>import</arg>
+            <arg>--connect</arg>
+            <arg>${jdbc_url}</arg>
+            <arg>--username</arg>
+            <arg>${username}</arg>
+            <arg>--password</arg>
+            <arg>${password}</arg>
+            <arg>--table</arg>
+            <arg>${permTable}</arg>
+            <arg>--where</arg>
+            <arg>${query}</arg>
+            <arg>--split-by</arg>
+            <arg>${split_by_column}</arg>
+            <arg>--target-dir</arg>
+            <arg>${target_dir}</arg>
+            <arg>--verbose</arg>
+            <arg>--class-name</arg>
+            <arg>${class_name}</arg>
+            <arg>--as-avrodatafile</arg>
+            <arg>--enclosed-by</arg>
+            <arg>'\"'</arg>
+            <arg>--null-string</arg>
+            <arg>'\\N'</arg>
+            <arg>--null-non-string</arg>
+            <arg>'\\N'</arg>
+            <arg>--compress</arg>
+            <arg>--compression-codec</arg>
+            <arg>org.apache.hadoop.io.compress.SnappyCodec</arg>
+            <arg>--map-column-java</arg>
+            <arg>order_date=String</arg>
+            <arg>--num-mappers</arg>
+            <arg>${num_mappers}</arg>
+            <arg>--mapreduce-job-name</arg>
+            <arg>${mapred_job_name}</arg>
+            <arg>--delete-target-dir</arg>
+          </sqoop>
+          <ok to="find_new_partition"/>
+          <error to="kill"/>
+        </action>
+
+          <!-- insert data from temp table to perm table -->
+          <action name="find_new_partition" cred="hive2_auth">
+            <hive2 xmlns="uri:oozie:hive2-action:0.1">
+              <job-tracker>${jobTracker}</job-tracker>
+              <name-node>${nameNode}</name-node>
+              <configuration>
+                <property>
+                  <name>hive.exec.scratchdir</name>
+                  <value>/tmp/hive-scratch</value>
+                </property>
+              </configuration>
+              <jdbc-url>${hive2JdbcUrl}</jdbc-url>
+              <script>${nameNode}${commonPath}/newPartitions.hql</script>
+              <param>tempDb=${tempDb}</param>
+              <param>tempTable=${tempTable}</param>
+            </hive2>
+            <ok to="Ingest_to_perm_table" />
+            <error to="kill" />
+          </action>
+
+          <!-- insert data from temp table to perm table -->
+          <action name="Ingest_to_perm_table" cred="hive2_auth">
+            <hive2 xmlns="uri:oozie:hive2-action:0.1">
+              <job-tracker>${jobTracker}</job-tracker>
+              <name-node>${nameNode}</name-node>
+              <configuration>
+                <property>
+                  <name>hive.exec.scratchdir</name>
+                  <value>/tmp/hive-scratch</value>
+                </property>
+              </configuration>
+              <jdbc-url>${hive2JdbcUrl}</jdbc-url>
+              <script>${nameNode}${workflowBasePath}/${permDb}/${permTable}/ingest.hql</script>
+              <param>ingest_date=${ingest_date}</param>
+              <param>permDb=${permDb}</param>
+              <param>permTable=${permTable}</param>
+              <param>tempDb=${tempDb}</param>
+              <param>tempTable=${tempTable}</param>
+            </hive2>
+            <ok to="emailSuccess" />
+            <error to="kill" />
+          </action>
+
+        <action name="emailSuccess">
+          <email xmlns="uri:oozie:email-action:0.1">
+            <to>${email_to}</to>
+            <subject>SUCCESS - Oozie job ${wf:name()}</subject>
+            <body>
+             Workflow succeeded :
+             Workflow ID = ${wf:id()}
+             Workflow Name = ${wf:name()}
+             Workflow Application path = ${wf:appPath()}
+             Workflow User = ${wf:user()}
+             Workflow run = ${wf:run()}
+            </body>
+          </email>
+          <ok to="end" />
+          <error to="kill" />
+        </action>
+
+    
+    <kill name="kill">
+          <message>Action failed, error message[${wf:errorMessage(wf:lastErrorNode())}]</message>
+        </kill>
+
+        <end name="end"/>
+
+</workflow-app>
